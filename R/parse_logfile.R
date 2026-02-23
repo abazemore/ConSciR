@@ -15,11 +15,10 @@
 #' @examples parse_brand(dir("logfiles/tinytag", full.names = TRUE), "Anonymous Library", "tinytag")
 #'
 parse_brand <- function (directory,
-                              Site = "Site",
-                              brand = FALSE,
-                              sheet = "Hanwell",
-                              ...) {
-
+                         Site = "Site",
+                         brand = NULL,
+                         sheet = "Hanwell",
+                         ...) {
   datalist <- dir(directory, full.names = TRUE)
 
   if (brand %in% c(
@@ -32,21 +31,26 @@ parse_brand <- function (directory,
     "tinytag",
     "trend"
   ))
- datalist <-   switch(brand,
-  "hanwell" =lapply(datalist, tidy_Hanwell, Site = Site, sheet = sheet),
-   "meaco" = lapply(datalist, parse_meaco),
-   "miniclima" = lapply(datalist, parse_miniClima, Site = Site),
-  "previous" = lapply(datalist, parse_previous, Site = Site),
-  "rotronic" = lapply(datalist, parse_rotronic, Site = Site),
-   "tandd" = lapply(datalist, parse_TandD, Site = Site),
-   "tinytag" = lapply(datalist, parse_tinytag, Site = Site),
-   "trend" = lapply(datalist, parse_trendBMS, Site = Site)
- )
-
+  {
+    datalist <-   switch(
+      brand,
+      "hanwell" = lapply(datalist, tidy_Hanwell, Site = Site, sheet = sheet),
+      "meaco" = lapply(datalist, parse_meaco),
+      "miniclima" = lapply(datalist, parse_miniClima, Site = Site),
+      "previous" = lapply(datalist, parse_previous, Site = Site),
+      "rotronic" = lapply(datalist, parse_rotronic, Site = Site),
+      "tandd" = lapply(datalist, parse_TandD, Site = Site),
+      "tinytag" = lapply(datalist, parse_tinytag, Site = Site),
+      "trend" = lapply(datalist, parse_trendBMS, Site = Site)
+    )
+  } else {
+    stop('Brand not supported')
+  }
+  datalist <- datalist[is.vector(datalist)]
 
   dat <- combine_data(datalist)
 
-  return(dat)
+  dat
 }
 
 #' Parse Hanwell file
@@ -59,62 +63,75 @@ parse_brand <- function (directory,
 # parse_hanwell <- function(filepath) {
 #   message("Parsing as Hanwell")
 #
-#   return(dat)
+#   dat
 # }
 
 #' Parse Meaco file
 #'
-#' @param filepath .csv logfile.
+#' @description
+#' Extracts temperature and humidity data from Meaco logfile.
 #'
-#' @returns dat, a dataframe in a standard format used by other functions in this package
+#' @param filepath path to logfile as a string
 #'
+#' @inherit parse_miniClima returns
+#'
+
 #' @noRd
 parse_meaco <- function(filepath) {
   message("Parsing as Meaco")
 
-    file_head <- readr::read_csv(filepath, n_max = 3)
+  file_head <- readr::read_csv(filepath, n_max = 3)
+  if ('LUX' %in% names(file_head)) {
+    message("Temperature and humidity logs only")
+    return(NA)
+  }
+  # Pre-Gingerbread export structure
+  else if ("DATE" %in% names(file_head)) {
+    dat <- readr::read_csv(filepath) |>
+      dplyr::mutate(
+        Site = as.character(RECEIVER),
+        Sensor = as.character(TRANSMITTER),
+        Date = as.POSIXct(DATE),
+        Temp = as.numeric(TEMPERATURE),
+        RH = as.numeric(HUMIDITY),
+        .keep = "none"
+      )
+  }
+  else if (ncol(file_head) == 1 &&
+           stringr::str_detect(names(file_head), ' - ID')) {
+    # Logger info in first line in format "Site - Sensor - ID:00"
+    Receiver <- stringr::str_extract(colnames(file_head), '^.*?(?= - )')
+    Sensor <- stringr::str_extract(colnames(file_head), '(?<= - ).*?(?= - )')
 
-    # Pre-Gingerbread export structure
-    if ("DATE" %in% names(file_head)) {
-      dat <- readr::read_csv(filepath) |>
-        dplyr::mutate(
-          Site = as.character(RECEIVER),
-          Sensor = as.character(TRANSMITTER),
-          Date = as.POSIXct(DATE),
-          Temp = as.numeric(TEMPERATURE),
-          RH = as.numeric(HUMIDITY),
-          .keep = "none"
-        )
-    }
-    else if (ncol(file_head) == 1 &&
-             stringr::str_detect(names(file_head), ' - ID')) {
-      # Logger info in first line in format "Site - Sensor - ID:00"
-      receiver <- stringr::str_extract(colnames(file_head), '^.*?(?= - )')
-      Sensor <- stringr::str_extract(colnames(file_head), '(?<= - ).*?(?= - )')
+    dat <- readr::read_csv(filepath, skip = 1) |>
+      dplyr::mutate(
+        Site = as.character(Receiver),
+        Sensor = as.character(Sensor),
+        Date = lubridate::parse_date_time(Timestamp, orders = c('dmy HM', 'dmy HMS')),
+        Temp = as.numeric(Temperature),
+        RH = as.numeric(Humidity),
+        .keep = "none"
+      )
 
-      dat <- readr::read_csv(filepath, skip = 1) |>
-        dplyr::mutate(
-          Site = as.character(receiver),
-          Sensor = as.character(Sensor),
-          Date = lubridate::parse_date_time(Timestamp, orders = c('dmy HM', 'dmy HMS')),
-          Temp = as.numeric(Temperature),
-          RH = as.numeric(Humidity),
-          .keep = "none"
-        )
-
-    }
-
-  return(dat)
+  }
+  if (all(is.na(dat$Date)) || all(is.na(dat$Temp))) {
+    warning("May not be Meaco file")
+  }
+  dat
 }
 
 #' Parse miniClima file
 #'
-#' @param filepath .csv logfile.
-#' @param Site Character string specifying site name to add as a column.
-#'   Default is "Site".
+#' @description
+#' Extracts temperature and humidity data from miniClima logfile.
 #'
-#' @returns dat, a dataframe in a standard format used by other functions in this package
+#' @param filepath path to logfile as a string
+#' @param Site name of the site
 #'
+#' @returns dat, a data frame containing the raw TRH data, with columns
+#' for Site, sensor, date, temperature, and relative humidity.
+#'
+
 #' @noRd
 parse_miniClima <- function(filepath, Site = "Site") {
   message("Parsing as miniClima")
@@ -123,8 +140,6 @@ parse_miniClima <- function(filepath, Site = "Site") {
   if (stringr::str_detect(filepath, " EBC")) {
     Sensor <- stringr::str_extract(filepath, "[A-Za-z0-9 ]+(?= EBC)") |>
       stringr::str_replace_na("Unknown")
-  } else {
-    info <- ""
   }
 
   dat <- readr::read_csv2(
@@ -149,16 +164,19 @@ parse_miniClima <- function(filepath, Site = "Site") {
       .before = Date,
       .keep = "none"
     )
-  return(dat)
+
+  if (all(is.na(dat$Date)) || all(is.na(dat$Temp))) {
+    warning("May not be miniClima file")
+  }
+  dat
 }
 
 #' Parse Rotronic file
 #'
-#' @param filepath .csv or .xls logfile.
-#' @param Site Character string specifying site name to add as a column.
-#'   Default is "Site".
+#' @description
+#' Extracts temperature and humidity data from Rotronic logfile.
 #'
-#' @returns dat, a dataframe in a standard format used by other functions in this package
+#' @inherit parse_miniClima params returns
 #'
 #' @noRd
 parse_rotronic <- function(filepath, Site = "Site") {
@@ -166,45 +184,48 @@ parse_rotronic <- function(filepath, Site = "Site") {
   # Extract first few rows containing logger information
   if (stringr::str_detect(filepath, ".xls$")) {
     file_head <- readr::read_delim(filepath,
-                                   col_names = c("date", "time", "RH", "Temp"),
+                                   col_names = c("Date", "Time", "RH", "Temp"),
                                    delim = "\t")
     file_data <- readr::read_delim(
       filepath,
-      col_names = c("date", "time", "RH", "Temp"),
+      col_names = c("Date", "Time", "RH", "Temp"),
       delim = "\t",
       skip = 23
     )
   }
 
   if (stringr::str_detect(filepath, ".csv$")) {
-    file_head <- readr::read_csv(filepath, col_names = c("date"), n_max = 5)
+    file_head <- readr::read_csv(filepath, col_names = c("Date"), n_max = 5)
     file_data <- readr::read_csv(filepath,
-                                 col_names = c("date", "time", "RH", "Temp"),
+                                 col_names = c("Date", "Time", "RH", "Temp"),
                                  skip = 23)
   }
-
+  if (all(is.na(file_data$Date)) || all(is.na(file_data$Temp))) {
+    warning("May not be Rotronic file")
+  }
   # Rest of file is observations
   dat <-  file_data |>
     dplyr::mutate(
       Site = as.character(Site),
-      Sensor = as.character(file_head$date[2]),
-      Date = lubridate::parse_date_time(paste(date, time), orders = "dmy HMS"),
-      Temp = as.numeric(stringr::str_extract_all(Temp, "[:digit:]+\\.?[:digit:]+")),
+      Sensor = as.character(file_head$Date[2]),
+      Date = lubridate::parse_date_time(paste(Date, Time), orders = "dmy HMS"),
+      Temp = as.numeric(
+        stringr::str_extract_all(Temp, "[:digit:]+\\.?[:digit:]+")
+      ),
       RH = as.numeric(stringr::str_extract_all(RH, "[:digit:]+\\.?[:digit:]+")),
       .before = RH,
       .keep = "none"
     )
-  return(dat)
+  dat
 }
 
 #' Parse T&D file
 #'
-#' @param filepath .csv logfile.
-#' @param Site Character string specifying site name to add as a column.
-#'   Default is "Site".
+#' @description
+#' Extracts temperature and humidity data from T&D logfile.
 #'
-#' @returns A dataframe in a standard format used by other functions in this package
-#'
+#' @inherit parse_miniClima params returns
+
 #' @noRd
 parse_TandD <- function(filepath, Site = "Site") {
   message("Parsing as T&D")
@@ -212,13 +233,12 @@ parse_TandD <- function(filepath, Site = "Site") {
 
   # Assumes name includes name and serial starting with F8 which may not be accurate
   if (stringr::str_detect(filepath, 'F8')) {
-
     Sensor <- stringr::str_extract(filepath, "([A-Za-z0-9 ])+(?= F8)")
   }
-    else {
-      Sensor <- "Sensor unknown"
-      message('Sensor name not recoverable')
-    }
+  else {
+    Sensor <- "Sensor unknown"
+    message('Sensor name not recoverable')
+  }
 
   # Rest of file is observations
   dat <- readr::read_csv(
@@ -245,18 +265,19 @@ parse_TandD <- function(filepath, Site = "Site") {
       .before = Date,
       .keep = "none"
     )
-  return(dat)
+
+  if (all(is.na(dat$Date)) || all(is.na(dat$Temp))) {
+    warning("May not be T&D file")
+  }
+  dat
 }
 
 #' Parse TinyTag logfile
 #'
-#' @param filepath .csv logfile exported from TinyTag Explorer
+#' @description
+#' Extracts temperature and humidity data from TinyTag logfile.
 #'
-#' @returns dat, a dataframe in a standard format used by other functions in this package
-#'
-#' @importFrom dplyr mutate
-#' @importFrom readr read_csv
-#' @importFrom stringr str_extract_all str_remove
+#' @inherit parse_miniClima params returns
 #'
 #' @noRd
 parse_tinytag <- function(filepath, Site = "Site") {
@@ -267,6 +288,7 @@ parse_tinytag <- function(filepath, Site = "Site") {
     col_types = "cccc",
     n_max = 5
   )
+
   dat <- readr::read_csv(filepath,
                          col_names = c("id", "Date", "Temp", "RH"),
                          skip = 5) |>
@@ -275,30 +297,34 @@ parse_tinytag <- function(filepath, Site = "Site") {
       .before = Date,
       Sensor = as.character(file_head$Temp[4]),
       Date = lubridate::parse_date_time(Date, orders = c("ymd HMS", "dmy HMS", "dmy HM")),
-      Temp = as.numeric(stringr::str_extract_all(Temp, "[:digit:]+\\.?[:digit:]+")),
+      Temp = as.numeric(
+        stringr::str_extract_all(Temp, "[:digit:]+\\.?[:digit:]+")
+      ),
       RH = as.numeric(stringr::str_extract_all(RH, "[:digit:]+\\.?[:digit:]+")),
       .keep = "none"
     )
-  return(dat)
+  if (all(is.na(dat$Date)) || all(is.na(dat$Temp))) {
+    warning("May not be T&D file")
+  }
+  dat
 }
 
 
 
 #' Parse Trend BMS file
 #'
-#' @param filepath .csv logfile.
-#' @param Site Character string specifying site name to add as a column.
-#'   Default is "Site".
+#' @description
+#' Extracts temperature and humidity data from a Trend BMS logfile.
 #'
-#' @returns dat, a dataframe in a standard format used by other functions in this package. Temp or RH will be NA.
+#' @inherit parse_miniClima params return
 #'
 #' @noRd
 parse_trendBMS <- function(filepath, Site = "Site") {
   message("Parsing as Trend BMS")
-  # Extract first few rows containing logger information
   file_head <- readr::read_csv(filepath,
                                col_names = c("Date", "obs"),
                                n_max = 1)
+  # Extract first few rows containing logger information
   # Chcek whether the file is temperature or humidity and set column name
   temp_or_RH <- if_else(stringr::str_detect(file_head$obs[1], "Temp"), "Temp", "RH")
   Sensor <- stringr::str_extract(file_head$obs[1], "(?<=\\[).*?(?= Space)")
@@ -306,25 +332,35 @@ parse_trendBMS <- function(filepath, Site = "Site") {
   dat <- readr::read_csv(filepath,
                          col_names = c("Date", temp_or_RH),
                          skip = 1) |>
-    #Add Site, location, model, and serial columns, parse as date/time
+
     dplyr::mutate(
       Site = as.character(Site),
       Sensor = Sensor,
       Date = lubridate::parse_date_time(Date, orders = "ymd HMS"),
       .before = Date
     )
-  return(dat)
+  if (all(is.na(dat$Date)) || all(is.na(dat$Temp))) {
+    warning("May not be Trend BMS file")
+  }
+  dat
 }
 
 #' Combine TRH data from a list
 #'
+#' @description
+#' Combines a list of parsed logfiles and returns a
 #'
 #'
 #' @param datalist A list of parsed dataframes
 #'
 #' @returns A dataframe containing all timestamped rows in `datalist`
+#' @export
 #'
-#' @noRd
+#' @examples
+#' \donttest{
+#' all_data <- combine_data(datalist)
+#' }
+#'
 combine_data <- function(datalist) {
   message("Combining files")
 
@@ -340,5 +376,5 @@ combine_data <- function(datalist) {
     .keep = "none"
   ) |>
     tidyr::drop_na(any_of("Date"))
-  return(dat)
+  dat
 }

@@ -1,9 +1,9 @@
 # # parse_datalogger
-# test_that("Central parsing function has expected number of columns and rows for Meaco", {
-#   expect_equal(nrow(parse_brand(test_path("fixtures", "meaco"), brand = "meaco")), 20)
-#   expect_equal(ncol(parse_brand(test_path("fixtures", "meaco"), brand = "meaco")), 5)
-#   expect_true(sum(is.na(parse_brand(test_path("fixtures", "meaco"), brand = ))) == 0)
-# })
+test_that("Central parsing function has expected number of columns and rows for Meaco", {
+  expect_equal(nrow(parse_brand(test_path("fixtures", "meaco"), brand = "meaco")), 20)
+  expect_equal(ncol(parse_brand(test_path("fixtures", "meaco"), brand = "meaco")), 5)
+  expect_true(sum(is.na(parse_brand(test_path("fixtures", "meaco"), brand = ))) == 0)
+})
 
 # parse_meaco
 test_that("Pre-Gingerbread Meaco file has correct number of columns and rows with no NA values", {
