@@ -16,7 +16,7 @@
 #'
 parse_brand <- function (directory,
                          Site = "Site",
-                         brand = NULL,
+                         brand = FALSE,
                          sheet = "Hanwell",
                          ...) {
   datalist <- dir(directory, full.names = TRUE)
@@ -39,7 +39,7 @@ parse_brand <- function (directory,
       "miniclima" = lapply(datalist, parse_miniClima, Site = Site),
       "previous" = lapply(datalist, parse_previous, Site = Site),
       "rotronic" = lapply(datalist, parse_rotronic, Site = Site),
-      "tandd" = lapply(datalist, parse_TandD, Site = Site),
+      "tandd" = lapply(datalist, parse_tandd, Site = Site),
       "tinytag" = lapply(datalist, parse_tinytag, Site = Site),
       "trend" = lapply(datalist, parse_trendBMS, Site = Site)
     )
@@ -79,11 +79,9 @@ parse_brand <- function (directory,
 #' @noRd
 parse_meaco <- function(filepath) {
   message("Parsing as Meaco")
-
-  file_head <- readr::read_csv(filepath, n_max = 3)
+  file_head <- readr::read_csv(filepath, n_max = 1)
   if ('LUX' %in% names(file_head)) {
-    message("Temperature and humidity logs only")
-    return(NA)
+    return("Temperature and humidity logs only")
   }
   # Pre-Gingerbread export structure
   else if ("DATE" %in% names(file_head)) {
@@ -213,7 +211,7 @@ parse_rotronic <- function(filepath, Site = "Site") {
         stringr::str_extract_all(Temp, "[:digit:]+\\.?[:digit:]+")
       ),
       RH = as.numeric(stringr::str_extract_all(RH, "[:digit:]+\\.?[:digit:]+")),
-      .before = RH,
+      .before = "Date",
       .keep = "none"
     )
   dat
@@ -227,7 +225,7 @@ parse_rotronic <- function(filepath, Site = "Site") {
 #' @inherit parse_miniClima params returns
 
 #' @noRd
-parse_TandD <- function(filepath, Site = "Site") {
+parse_tandd <- function(filepath, Site = "Site") {
   message("Parsing as T&D")
   message("Keeping TRH data only")
 
@@ -294,13 +292,13 @@ parse_tinytag <- function(filepath, Site = "Site") {
                          skip = 5) |>
     dplyr::mutate(
       Site = as.character(Site),
-      .before = Date,
       Sensor = as.character(file_head$Temp[4]),
       Date = lubridate::parse_date_time(Date, orders = c("ymd HMS", "dmy HMS", "dmy HM")),
       Temp = as.numeric(
         stringr::str_extract_all(Temp, "[:digit:]+\\.?[:digit:]+")
       ),
       RH = as.numeric(stringr::str_extract_all(RH, "[:digit:]+\\.?[:digit:]+")),
+      .before = Date,
       .keep = "none"
     )
   if (all(is.na(dat$Date)) || all(is.na(dat$Temp))) {
@@ -326,7 +324,7 @@ parse_trendBMS <- function(filepath, Site = "Site") {
                                n_max = 1)
   # Extract first few rows containing logger information
   # Chcek whether the file is temperature or humidity and set column name
-  temp_or_RH <- if_else(stringr::str_detect(file_head$obs[1], "Temp"), "Temp", "RH")
+  temp_or_RH <- dplyr::if_else(stringr::str_detect(file_head$obs[1], "Temp"), "Temp", "RH")
   Sensor <- stringr::str_extract(file_head$obs[1], "(?<=\\[).*?(?= Space)")
   #Rest of file is observations
   dat <- readr::read_csv(filepath,
@@ -336,7 +334,7 @@ parse_trendBMS <- function(filepath, Site = "Site") {
     dplyr::mutate(
       Site = as.character(Site),
       Sensor = Sensor,
-      Date = lubridate::parse_date_time(Date, orders = "ymd HMS"),
+      Date = lubridate::parse_date_time(Date, orders = "dmy HMS"),
       .before = Date
     )
   if (all(is.na(dat$Date)) || all(is.na(dat$Temp))) {
