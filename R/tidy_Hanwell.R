@@ -1,74 +1,185 @@
-#' Tidy Hanwell EMS Data (Min-Max report)
+#' Tidy Hanwell EMS Data
 #'
 #' @description
-#' This function reads and processes Hanwell Environmental Monitoring System (EMS) data,
-#' transforming it into a tidy format suitable for analysis.
+#' This function tidies Hanwell Environmental Monitoring System (EMS) data from either
+#' Excel sheets or CSV files.
 #'
+#' - Default mode (MinMax = FALSE): Reads raw date, temperature, and humidity data.
+#' - Min-Max mode (MinMax = TRUE): Under development to read min-max average data (CSV only).
 #'
-#' @param EMS_MinMax_datapath EMS_MinMax_datapath Character string specifying the
+#' @param EMS_datapath Character string specifying the
 #' file path to the Hanwell EMS data file.
+#' @param Site Character string specifying site name to add as a column.
+#'   Default is "Site".
+#' @param MinMax Logical flag; if TRUE, reads Min-Max format,
+#'   otherwise reads raw data. Default is FALSE.
+#' @param sheet Optional, Excel sheet name for reading Excel files. The default is "Hanwell"
+#' @param ... Additional arguments passed to \code{readxl::read_excel} for Excel reading.
 #'
-#' @return A tibble containing the tidied Hanwell EMS data with the following columns:
-#'
-#' \itemize{
-#'   \item Date Time POSIXct datetime of the measurement
-#'   \item Sensor Character string identifying the sensor
-#'   \item TempMin Numeric minimum temperature (°C)
-#'   \item TempMax Numeric maximum temperature (°C)
-#'   \item Temp Numeric average temperature (°C)
-#'   \item RHMin Numeric minimum relative humidity (%)
-#'   \item RHMax Numeric maximum relative humidity (%)
-#'   \item RH Numeric average relative humidity (%)
-#'   \item Date Date of the measurement (duplicate of Date Time)
+#' @return A tibble containing tidied Hanwell EMS data, with columns including:
+#' \describe{
+#'   \item{Site}{Character, site name as specified by \code{Site} argument.}
+#'   \item{Sensor}{Character, sensor identifier extracted from the file or metadata.}
+#'   \item{Date}{POSIXct datetime of the measurement.}
+#'   \item{Temp}{Numeric temperature measurement in °C (average for MinMax).}
+#'   \item{RH}{Numeric relative humidity measurement in \% (average for MinMax).}
+#'   \item{TempMin, TempMax, RHMin, RHMax}{(Only for MinMax reports) Numeric min/max values of Temp and RH.}
 #' }
-#'
-#'
 #' @export
 #'
-#'
-#' @importFrom lubridate parse_date_time
+#' @importFrom readxl read_excel
+#' @importFrom readr read_csv cols
 #' @importFrom tools file_ext
-#' @importFrom readr read_csv
-#' @importFrom dplyr mutate across
-#' @importFrom tidyr pivot_longer pivot_wider separate
-#' @importFrom stringr str_replace
+#' @importFrom dplyr mutate across select relocate
+#' @importFrom tidyr separate pivot_longer pivot_wider
+#' @importFrom lubridate parse_date_time dmy_hm
+#' @importFrom stringr str_remove_all str_trim str_replace str_detect fixed regex
 #'
 #' @examples
 #'
 #' \donttest{
-#' # Example usage: hanwell_data <- tidy_Hanwell("path/to/your/EMS_MinMax_data.csv")
+#' # Example usage: hanwell_data <- tidy_Hanwell("path/to/your/hanwell_data.csv")
 #' }
 #'
+#' # mydata file
+#' filepath <- data_file_path("mydata.xlsx")
+#'
+#' tidy_Hanwell(filepath, sheet = "Hanwell", Site = "London") |> head()
 #'
 #'
-tidy_Hanwell <- function(EMS_MinMax_datapath) {
+tidy_Hanwell <- function(EMS_datapath,
+                         Site = "Site",
+                         MinMax = FALSE,
+                         sheet = "Hanwell", ...) {
+  ext <- tolower(file_ext(EMS_datapath))
 
-  ext = tools::file_ext(EMS_MinMax_datapath)
+  if (MinMax) {
+    # MinMax mode is CSV only
+    if (ext != "csv") stop("MinMax format processing currently supports only CSV files")
 
-  ems =
-    readr::read_csv(EMS_MinMax_datapath, na = c("", "-", "NA"), skip = 7)
+    ems <- readr::read_csv(EMS_datapath, na = c("", "-", "NA"), skip = 7)
+    ems_data_end <- which(grepl("Alarm Limits", ems$`Date Time`)) - 2
+    ems <- ems[1:ems_data_end, ]
 
-  ems_data_end = which(grepl("Alarm Limits", ems$`Date Time`)) - 2
+    ems_tidy <- ems |>
+      mutate(`Date Time` = parse_date_time(`Date Time`, orders = "%d/%m/%Y %H:%M:%S")) |>
+      mutate(across(-`Date Time`, as.numeric)) |>
+      pivot_longer(cols = -`Date Time`) |>
+      separate(name, sep = " Chan: ", into = c("Sensor", "Channel")) |>
+      mutate(
+        Channel = str_replace(Channel, "C Min", "TempMin"),
+        Channel = str_replace(Channel, "C Max", "TempMax"),
+        Channel = str_replace(Channel, "C Average", "Temp"),
+        Channel = str_replace(Channel, "%RH Min", "RHMin"),
+        Channel = str_replace(Channel, "%RH Max", "RHMax"),
+        Channel = str_replace(Channel, "%RH Average", "RH"),
+        Channel = str_replace(Channel, "1 ", ""),
+        Channel = str_replace(Channel, "2 ", "")
+      ) |>
+      pivot_wider(names_from = Channel, values_from = value) |>
+      mutate(Date = `Date Time`) |>
+      select(-`Date Time`) |>
+      mutate(Site = Site) |>
+      relocate(Site, Sensor, Date)
 
-  ems = ems[1: ems_data_end, ]
+    return(ems_tidy)
+  }
 
-  ems =
-    ems |>
-    dplyr::mutate(`Date Time` = lubridate::parse_date_time(`Date Time`, format = "%d/%m/%Y %H:%M:%S")) |>
-    dplyr::mutate(across(-c(`Date Time`), as.numeric)) |>
-    tidyr::pivot_longer(cols = -`Date Time`) |>
-    tidyr::separate(name, sep = " Chan: ", into = c("Sensor", "Channel")) |>
-    dplyr::mutate(
-      across("Channel", \(x) str_replace(x, "C Min", "TempMin")),
-      across("Channel", \(x) str_replace(x, "C Max", "TempMax")),
-      across("Channel", \(x) str_replace(x, "C Average", "Temp")),
-      across("Channel", \(x) str_replace(x, "%RH Min", "RHMin")),
-      across("Channel", \(x) str_replace(x, "%RH Max", "RHMax")),
-      across("Channel", \(x) str_replace(x, "%RH Average", "RH")),
-      across("Channel", \(x) str_replace(x, "1 ", "")),
-      across("Channel", \(x) str_replace(x, "2 ", ""))) |>
-    tidyr::pivot_wider(names_from = Channel, values_from = value) |>
-    dplyr::mutate(Date = `Date Time`)
+  if (ext %in% c("xls", "xlsx")) {
+    raw_df <- readxl::read_excel(EMS_datapath, sheet = sheet, col_names = FALSE, ...)
 
-  return(ems)
+    header_mask <- apply(raw_df, 1, function(row) {
+      all(c("Date Time", "Temperature (C)", "Humidity (%RH)") %in% as.character(row))
+    })
+    header_row <- which(header_mask)[1]
+    if (is.na(header_row)) stop("Header row not found in Excel sheet")
+
+    sensor_row <- max(which(!is.na(raw_df[1:(header_row-1),1]) & raw_df[1:(header_row-1),1] != ""))
+    sensor_name_raw <- as.character(raw_df[sensor_row, 1])
+    sensor_name <- sensor_name_raw |>
+      str_remove_all('["]') |>
+      str_remove_all(",+$") |>
+      str_trim()
+
+    colnames(raw_df) <- as.character(raw_df[header_row, ])
+    data_sub <- raw_df[(header_row + 1):nrow(raw_df), ]
+
+    # Remove lines after end-of-data marker minus 12 rows
+    end_marker_row <- which(str_detect(data_sub[[1]], fixed("---- END OF DATA ----")))
+    if (length(end_marker_row) > 0) {
+      data_end <- end_marker_row[1] - 13
+      if (data_end < 1) stop("Data end position before data start")
+      data_sub <- data_sub[1:data_end, ]
+    }
+
+    df <- data_sub |>
+      select(`Date Time`, `Temperature (C)`, `Humidity (%RH)`)
+
+    date_col <- df$`Date Time`
+    if (all(!is.na(as.numeric(as.character(date_col))))) {
+      datevals <- as.POSIXct((as.numeric(as.character(date_col)) - 25569) * 86400,
+                             origin = "1970-01-01", tz = "UTC")
+    } else {
+      datevals <- lubridate::dmy_hm(date_col)
+    }
+
+    df <- df |>
+      mutate(Date = datevals,
+             Temp = as.numeric(`Temperature (C)`),
+             RH = as.numeric(`Humidity (%RH)`),
+             Site = Site,
+             Sensor = sensor_name) |>
+      select(Site, Sensor, Date, Temp, RH)
+    return(df)
+  }
+
+  else if (ext == "csv") {
+    lines <- readLines(EMS_datapath)
+
+    header_idx <- which(
+      str_detect(lines, fixed("Date Time")) &
+        str_detect(lines, fixed("Temperature (C)")) &
+        str_detect(lines, fixed("Humidity (%RH)"))
+    )
+    if (length(header_idx) == 0) stop("Header line not found in CSV file")
+    header_line <- header_idx[1]
+
+    non_empty_before_header <- which(str_trim(lines[1:(header_line - 1)]) != "")
+    sensor_line <- max(non_empty_before_header)
+    sensor_name_raw <- str_trim(lines[sensor_line])
+    sensor_name <- sensor_name_raw |>
+      str_remove_all('["]') |>
+      str_remove_all(",+$") |>
+      str_trim()
+
+    end_marker_idx <- which(str_detect(lines, fixed("---- END OF DATA ----")))
+    if (length(end_marker_idx) == 0) stop("End-of-data marker not found in CSV file")
+    data_end <- end_marker_idx[1] - 13
+
+    data_start <- header_line + 1
+    data_lines <- lines[data_start:data_end]
+
+    tmp_file <- tempfile(fileext = ".csv")
+    writeLines(data_lines, tmp_file)
+
+    df <- readr::read_csv(tmp_file,
+                          col_names = c("Date", "Temp", "RH"),
+                          col_types = readr::cols(
+                            Date = readr::col_character(),
+                            Temp = readr::col_double(),
+                            RH = readr::col_double()
+                          ),
+                          trim_ws = TRUE) |>
+      mutate(Date = lubridate::parse_date_time(Date, orders = c("dmy HMS", "dmy HM", "ymd HMS", "ymd HM")),
+             Site = Site,
+             Sensor = sensor_name) |>
+      select(Site, Sensor, Date, Temp, RH)
+
+    unlink(tmp_file)
+    return(df)
+  }
+
+  else {
+    stop("Unsupported file extension: ", ext)
+  }
 }

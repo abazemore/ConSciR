@@ -6,56 +6,95 @@
 \usage{
 tidy_TRHdata(
   mydata,
-  Site_col = "Site",
-  Sensor_col = "Sensor",
-  Date_col = "Date",
-  Temp_col = "Temp",
-  RH_col = "RH"
+  Site = "Site",
+  Sensor = "Sensor",
+  Date = "Date",
+  Temp = "Temp",
+  RH = "RH",
+  avg_time = "none",
+  avg_statistic = "median",
+  avg_groups = c("Site", "Sensor"),
+  ...
 )
 }
 \arguments{
-\item{mydata}{A data frame containing the raw TRH data. This should include columns
-for site, sensor, date, temperature, and relative humidity.}
+\item{mydata}{A data frame containing TRH data. Ideally, this should have
+columns for "Site", "Sensor", "Date", "Temp" (temperature), and "RH" (relative humidity).
+The function requires at least the date, temperature, and relative humidity columns to be present.
+Site and sensor columns are optional; if missing, the function will add default
+columns named "Site" and "Sensor" respectively with values below.}
 
-\item{Site_col}{A string specifying the name of the column in `mydata` that contains
-location information. Default is "Site".}
+\item{Site}{A string specifying the name of the column in \code{mydata} that contains
+location information. If missing, defaults to "Site".}
 
-\item{Sensor_col}{A string specifying the name of the column in `mydata` that contains
-sensor information. Default is "Sensor".}
+\item{Sensor}{A string specifying the name of the column in \code{mydata} that contains
+sensor information. If missing, defaults to "Sensor".}
 
-\item{Date_col}{A string specifying the name of the column in `mydata` that contains
-date information. Default is "Date".}
+\item{Date}{A string specifying the name of the column in \code{mydata} that contains
+date information. Default is "Date". The column should ideally contain ISO 8601
+date-time formatted strings (e.g. "2025-01-01 00:00:00"), but the function will try to
+parse a variety of common datetime formats.}
 
-\item{Temp_col}{A string specifying the name of the column in `mydata` that contains
+\item{Temp}{A string specifying the name of the column in \code{mydata} that contains
 temperature data. Default is "Temp".}
 
-\item{RH_col}{A string specifying the name of the column in `mydata` that contains
+\item{RH}{A string specifying the name of the column in \code{mydata} that contains
 relative humidity data. Default is "RH".}
+
+\item{avg_time}{Character string specifying the averaging interval.
+One of "none" (no averaging), "hour", "day", or "month", etc.
+See \code{lubridate::floor_date()} for rounding intervals.}
+
+\item{avg_statistic}{Statistic for averaging; default is "median".}
+
+\item{avg_groups}{Character vector specifying grouping columns for time-averaging.
+These are then returned as factors. Default is c("Site", "Sensor").}
+
+\item{...}{Additional arguments (currently unused).}
 }
 \value{
-A tidy data frame containing processed TRH data with columns for Site,
-Sensor, Date (floored to the nearest hour), Temperature (mean values),
-and Relative Humidity (mean values).
+A tidy data frame with processed TRH data. When averaging,
+date times are floored, temperature and humidity are averaged,
+groups are factored, and implausible values filtered.
 }
 \description{
 This function tidies and processes temperature, relative humidity, and date data
-from a given dataset.
+from a given dataset. Dataset should minimally have "Date", "Temp" and "RH" columns.
 
-It filters out rows with missing date values, renames columns,
-converts temperature and humidity to numeric types, and groups the data by site,
-sensor, and date. The function also pads the data to ensure hourly intervals.
+It filters out rows with missing dates, attempts to parse dates,
+converts temperature and humidity to numeric types, and groups the data by Site,
+Sensor, and Date based on the averaging interval.
+
+If the site or sensor columns are not present in the data, the function
+defaults to adding columns named "Site" and "Sensor".
+This can be changed in the arguments.
+
+When an averaging option of "hour", "day", "month" is selected,
+it uses \code{dplyr} and \code{lubridate} functions to floor datetimes and calculate averages,
+the default is median average.
+See \code{lubridate::floor_date()} for rounding intervals.
 
 \itemize{
-   \item Filters out rows with missing dates
-   \item Renames columns for consistency
-   \item Converts temperature and relative humidity to numeric
-   \item Rounds dates down to the nearest hour
-   \item Calculates hourly averages for temperature and relative humidity
-   \item Pads the data to ensure hourly intervals
-   \item Filters out implausible temperature and humidity values
+  \item Filters out rows with missing dates.
+  \item Renames columns for consistency.
+  \item Converts temperature and relative humidity to numeric.
+  \item Adds default columns "Site" and "Sensor" when missing or not supplied in args.
+  \item Rounds dates down to the nearest hour, day, or month as per \code{avg_time}.
+  \item Calculates averages for temperature and relative humidity according to \code{avg_statistic}.
+  \item Filters out implausible temperature and humidity values (outside -50-80°C and 0-100\%RH).
 }
 }
 \examples{
+
+# mydata file
+filepath <- data_file_path("mydata.xlsx")
+mydata <- readxl::read_excel(filepath, sheet = "mydata", n_max = 10)
+
+tidy_TRHdata(mydata)
+
+tidy_TRHdata(mydata, avg_time = "hour")
+
+mydata |> add_humidity_calcs() |> tidy_TRHdata(avg_time = "hour")
 
 \donttest{
 # Example usage: TRH_data <- tidy_TRHdata("path/to/your/TRHdata.csv")

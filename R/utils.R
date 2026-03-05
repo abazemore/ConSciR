@@ -1,9 +1,12 @@
 #' @import utils
 utils::globalVariables(
-  c("data", "mouldtable", "days_mould", "time_diff", "mould_prob",
+  c("data", ".data",
+    "mouldtable", "days_mould", "time_diff", "mould_prob",
     "AbsLow", "AbsHigh", "AbsUpper", "Abs",
     "AH", "DP",
-    "y_Axis", "y_Low", "y_High",
+    "Mould_LIM", "Date_floor", "all_of",
+    "Temperature (C)", "Humidity (%RH)",
+    "y_Axis", "y_Low", "y_High", "y_func_val",
     "DATE", "RECEIVER", "TRANSMITTER", "TEMPERATURE", "HUMIDITY",
     "Date", "Site", "Sensor", "Temp", "RH", "Site_col", "Sensor_col",
     "Date Time", "name", "Channel", "value", "sym",

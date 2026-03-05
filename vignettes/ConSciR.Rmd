@@ -16,39 +16,39 @@ knitr::opts_chunk$set(
 )
 ```
 
-
 <!-- badges: start -->
 
 <!-- badges: end -->
 
-
 ## Introduction
 
-`ConSciR` is an R package specifically designed to assist conservators, scientists, and engineers 
-by providing a toolkit for performing calculations and streamlining common tasks in cultural 
-heritage conservation.
+`ConSciR` provides tools for the analysis of cultural heritage preventive conservation data. It includes functions for environmental data analysis, humidity calculations, sustainability metrics, conservation risks, and data visualisations such as psychrometric charts. It is designed to support conservators, scientists, and engineers by streamlining common calculations and tasks encountered in heritage conservation workflows. The package is motivated by the framework outlined in Cosaert and Beltran et al. (2022) ["Tools for the Analysis of Collection Environments"](https://www.getty.edu/conservation/publications_resources/pdf_publications/tools_for_the_analysis_of_collection_environments.html "Getty Tools publication").
 
 ## Install and load
 
-You can install the development version of the package from GitHub using either the `pak` or `devtools` package:
+``` r
+install.packages("ConSciR")
+library(ConSciR)
+```
+
+You can install the development version of the package from GitHub using the `pak` package:
 
 ``` r
 install.packages("pak")
 pak::pak("BhavShah01/ConSciR")
-```
 
--or-
-
-``` r
+# Alternatively
 # install.packages("devtools")
-devtools::install_github("BhavShah01/ConSciR")
+# devtools::install_github("BhavShah01/ConSciR")
 ```
 
 Visit the package GitHub page for updates and source code: [ConSciR Github](https://github.com/BhavShah01/ConSciR)
 
+This vignette provides a practical introduction to the package’s functionalities. For full details on all functions, see the package [Reference](https://bhavshah01.github.io/ConSciR/reference/index.html) manual or use `?function_name` within R.
+
 ## Examples
 
-Load the necessary packages:
+Load some useful packages:
 
 ```{r load packages, message=FALSE, warning=FALSE}
 # Load packages
@@ -57,9 +57,9 @@ library(dplyr)
 library(ggplot2)
 ```
 
-### Add calculated values using `mutate`
+### Add calculated values
 
-Enrich your dataset with environmental metrics computed by ConSciR functions:
+Transform your dataset with the functions in ConSciR:
 
 ```{r table of calculated values, message=FALSE, warning=FALSE}
 filepath <- data_file_path("mydata.xlsx")
@@ -70,6 +70,8 @@ mydata <- mydata |> filter(Sensor == "Room 1")
 # Add calculated values using mutate
 head(mydata) |> 
   mutate(
+    
+    # Humidity functions
     Absolute_Humidity = calcAH(Temp, RH), 
     Dew_Point = calcDP(Temp, RH), 
     Mixing_Ratio = calcMR(Temp, RH), 
@@ -78,16 +80,36 @@ head(mydata) |>
     Saturation_Vapour_Pressure = calcPws(Temp), 
     Actual_Vapour_Pressure = calcPw(Temp, RH), 
     Air_Density = calcAD(Temp, RH),
-    Temp_calc = calcTemp(RH, Dew_Point),
-    RH_AH_calc = calcRH_AH(Temp, Absolute_Humidity),
-    RH_DP_calc = calcRH_DP(Temp, Dew_Point)
+    
+    # Conservation risks
+    Mould_Growth_Rate_mm_day = calcMould_Zeng(Temp, RH, label = TRUE),
+    Mould_Growth_Limit = calcMould_Zeng(Temp, RH), 
+    Mould_Growth_Risk = ifelse(RH > Mould_Growth_Limit, "Mould risk", "No risk"),
+    Mould_Growth_Index = calcMould_VTT(Temp, RH), 
+    Lifetime = calcLM(Temp, RH), 
+    Preservation_Index = calcPI(Temp, RH), 
+    EMC_Wood = calcEMC_wood(Temp, RH),
+    
+    # Sustainability calculations 
+    Temp_from_DP = calcTemp(RH, Dew_Point),
+    RH_from_DP = calcRH_DP(Temp, Dew_Point),
+    RH_from_AH = calcRH_AH(Temp, Absolute_Humidity),
+    RH_if_2C_higher = calcRH_AH(Temp + 2, Absolute_Humidity)
+    
   ) |>
   glimpse()
 
+
+head(mydata) |> 
+  tidy_TRHdata() |> # tidy
+  add_time_vars() |> # add time factors 
+  add_humidity_calcs() |> # add humidity values 
+  add_conservation_calcs() |> # add conservation risks
+  add_humidity_adjustments() # add environmental zones and RH adjustments
+
 ```
 
-
-### Visualise and explore data with calculations
+### Visualise and explore data
 
 Combine calculations and plotting to explore patterns visually:
 
@@ -102,14 +124,13 @@ mydata |>
   # Create base plot using graph_TRH function
   graph_TRH() +
   # Add Absolute Humidity line
-  geom_line(aes(Date, AbsHum), color = "green") +
+  geom_line(aes(Date, AbsHum), color = "cyan4", alpha = 0.7) +
   # Add Dew Point line
-  geom_line(aes(Date, DewPoint), color = "purple") +
+  geom_line(aes(Date, DewPoint), color = "mediumvioletred", alpha = 0.7) +
   # Apply a theme
   theme_bw()
 
 ```
-
 
 -   **Conservator tools: mould growth index**\
     Calculate mould growth index using **`calcMould_VTT()`** and visualise it alongside humidity data.
@@ -118,37 +139,23 @@ mydata |>
 mydata |>
   mutate(Mould = calcMould_VTT(Temp, RH)) |>
   ggplot() +
-  geom_area(aes(Date, Mould), fill = "darkgreen", alpha = 0.5) +
-  labs(title = "Mould Growth Index", 
-       y = "Mould Index") + 
-  theme_classic()
-```
-
-
-
-### Built-in psychrometric chart
-
-Visualise the first 100 rows of the dataset with a psychrometric chart:
-
-```{r psychrometric chart, message=FALSE, warning=FALSE, fig.alt="psychrometric_chart_example"}
-
-head(mydata, 100) |>
-  graph_psychrometric() + 
+  geom_area(aes(Date, Mould), fill = "lightseagreen") +
+  labs(title = "Mould Growth Index", y = "Mould Index", x = NULL) + 
   theme_bw()
 ```
 
-### Psychrometric Chart Customisation
+### Psychrometric Chart
 
-Create tailored psychrometric charts by adjusting parameters such as temperature and humidity ranges, visual transparency, or y-axis metrics:
+Create psychrometric charts from temperature and humidity data. The functions from the package can be used to change the calculations used.
 
 ```{r psychrometric custom, message=FALSE, warning=FALSE, fig.alt="psychrometric_chart_custom"}
 
 head(mydata, 100) |>
   graph_psychrometric(
-    LowT = 10, 
+    LowT = 12, 
     HighT = 28,
-    LowRH = 20, 
-    HighRH = 80,
+    LowRH = 40, 
+    HighRH = 70,
     data_alpha = 0.3,
     y_func = calcAH
   ) + 
@@ -156,5 +163,3 @@ head(mydata, 100) |>
 ```
 
 ------------------------------------------------------------------------
-
-This vignette provides a practical introduction to the package’s core functionalities. For full details on all functions, see the package Reference manual or use `?function_name` within R.
